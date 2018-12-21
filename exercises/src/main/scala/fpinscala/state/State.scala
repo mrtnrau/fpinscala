@@ -110,13 +110,58 @@ object RNG {
     flatMap(ra)(a => map(rb)(b => f(a, b)))
 }
 
-case class State[S,+A](run: S => (A, S)) {
+case class State[S,+A](run: S => (A, S)) { self =>
   def map[B](f: A => B): State[S, B] =
-    ???
+    flatMap(a => State.unit(f(a)))
+
   def map2[B,C](sb: State[S, B])(f: (A, B) => C): State[S, C] =
-    ???
+    for {
+      a <- self
+      b <- sb
+    } yield f(a, b)
+
   def flatMap[B](f: A => State[S, B]): State[S, B] =
-    ???
+    State { s =>
+      val (a, s1) = run(s)
+      f(a).run(s1)
+    }
+}
+
+object State {
+  def unit[S, A](a: A): State[S, A] =
+    State { s => (a, s) }
+
+  def sequence[S, A](fa: List[State[S, A]]): State[S, List[A]] =
+    fa.foldRight(unit[S, List[A]](Nil)) { (sa, sla) => sa.map2(sla)(_ :: _) }
+
+  // def modify[S](f: S => S): State[S, Unit] = for {
+  //   s <- get
+  //   _ <- set(f(s))
+  // } yield ()
+
+  // def get[S]: State[S, S] =
+  //   State(s => (s, s))
+
+  // def set[S](s: S): State[S, Unit] =
+  //   State(_ => ((), s))
+
+  type Rand[A] = State[RNG, A]
+
+  def simulateMachineStep(input: Input)(machine: Machine): Machine =
+    input match {
+      case Coin if machine.locked && machine.candies > 0 =>
+        Machine(false, machine.candies, machine.coins + 1)
+      case Turn if !machine.locked =>
+        Machine(true, machine.candies - 1, machine.coins)
+      case _ => machine
+    }
+
+  def simulateMachine(inputs: List[Input]): State[Machine, (Int, Int)] =
+    State { machine =>
+      val m = inputs.map(simulateMachineStep _)
+                    .foldLeft(machine) { (state, step) => step(state) }
+      (m.coins -> m.candies, m)
+    }
 }
 
 sealed trait Input
@@ -124,8 +169,3 @@ case object Coin extends Input
 case object Turn extends Input
 
 case class Machine(locked: Boolean, candies: Int, coins: Int)
-
-object State {
-  type Rand[A] = State[RNG, A]
-  def simulateMachine(inputs: List[Input]): State[Machine, (Int, Int)] = ???
-}
